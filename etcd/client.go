@@ -8,6 +8,11 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
+type EtcdKV struct {
+	Key   string
+	Value []byte
+}
+
 type EtcdClientConfig struct {
 	clientv3.Config
 }
@@ -37,10 +42,10 @@ func (etcdCli *etcdClient) GetEtcdClient() *clientv3.Client {
 var etcdCli etcdClient
 
 func GetClient() *clientv3.Client {
-	return etcdCli.cli
+	return etcdCli.GetEtcdClient()
 }
 
-func NewClient(endpoints string) error {
+func New(endpoints string) error {
 	cfg := EtcdClientConfig{
 		clientv3.Config{
 			Endpoints:   strings.Split(endpoints, ","),

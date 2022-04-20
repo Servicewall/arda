@@ -2,9 +2,8 @@ package etcd
 
 import (
 	"context"
-	"fmt"
+	"errors"
 
-	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
@@ -16,9 +15,10 @@ const (
 	WatcherEventTypeDelete
 )
 
+// WatcherEventTypeDelete: Kvs is the deleted kv
 type WatcherResult struct {
 	EventType WatcherEventType
-	Kvs       []*mvccpb.KeyValue // only has value if EventType is WatcherEventTypeCurrent
+	Kvs       []EtcdKV
 }
 
 type WatcherCallback func(string, WatcherResult)
@@ -36,44 +36,57 @@ func (watcher *Watcher) Register() {
 
 func StartWatchers() {
 	for _, watcher := range registerWatchers {
-		go watcher.startWatch()
+		go watcher.startSyncWatch()
 	}
 }
 
-func (w *Watcher) startWatch() {
+func (w *Watcher) startSyncWatch() error {
 	cli := GetClient()
 	if cli == nil {
-		fmt.Printf("[etcd] faild to watch for etcd key %s, no etcd client found.\n", w.EtcdKey)
-		return
+		return errors.New("etcd client not found")
 	}
 
 	// get current value
-	resp, err := clientv3.NewKV(cli).Get(context.TODO(), w.EtcdKey, clientv3.WithPrefix())
-	if err == nil {
+	resp, err := Get(w.EtcdKey, clientv3.WithPrefix())
+	if err != nil {
+		return err
+	}
+	if w.Callback != nil {
 		w.Callback(w.EtcdKey, WatcherResult{
 			EventType: WatcherEventTypeCurrent,
-			Kvs:       resp.Kvs,
+			Kvs:       resp,
 		})
-	} else {
-		fmt.Printf("[etcd] get current value faild for key %s.", w.EtcdKey)
 	}
 
 	watchChan := clientv3.NewWatcher(cli).Watch(context.TODO(), w.EtcdKey, clientv3.WithPrefix())
 
 	for resp := range watchChan {
 		for _, event := range resp.Events {
+			var res *WatcherResult
 			switch event.Type {
 			case clientv3.EventTypePut:
-				w.Callback(w.EtcdKey, WatcherResult{
+				res = &WatcherResult{
 					EventType: WatcherEventTypePut,
-					Kvs:       []*mvccpb.KeyValue{event.Kv},
-				})
+					Kvs: []EtcdKV{EtcdKV{
+						Key:   string(event.Kv.Key),
+						Value: event.Kv.Value,
+					}},
+				}
 			case clientv3.EventTypeDelete:
-				w.Callback(w.EtcdKey, WatcherResult{
+				res = &WatcherResult{
 					EventType: WatcherEventTypeDelete,
-					Kvs:       []*mvccpb.KeyValue{event.Kv},
-				})
+					Kvs: []EtcdKV{EtcdKV{
+						Key:   string(event.Kv.Key),
+						Value: event.Kv.Value,
+					}},
+				}
+			}
+
+			if w.Callback != nil && res != nil {
+				w.Callback(w.EtcdKey, *res)
 			}
 		}
 	}
+
+	return nil
 }

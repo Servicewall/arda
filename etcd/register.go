@@ -25,14 +25,13 @@ func (sr *ServiceRegister) Start() error {
 		return errors.New("etcd client not found")
 	}
 
-	kv := clientv3.NewKV(cli)
 	lease := clientv3.NewLease(cli)
 	leaseGrantResp, err := lease.Grant(context.TODO(), sr.LeaseTTL)
 	if err != nil {
 		return err
 	}
 	leaseID := leaseGrantResp.ID
-	_, err = kv.Put(context.TODO(), sr.Key, sr.Value, clientv3.WithLease(leaseID))
+	err = Put(sr.Key, sr.Value, clientv3.WithLease(leaseID))
 	if err != nil {
 		return err
 	}
