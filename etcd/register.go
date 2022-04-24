@@ -16,6 +16,7 @@ type ServiceRegister struct {
 	Key         string
 	Value       string
 	etcdLeaseId *clientv3.LeaseID
+	etcdLease   clientv3.Lease
 	stopChan    chan bool
 }
 
@@ -68,14 +69,16 @@ func (sr *ServiceRegister) Start() error {
 	}()
 
 	sr.etcdLeaseId = &leaseID
+	sr.etcdLease = lease
 	sr.stopChan = stopChan
 
 	return nil
 }
 
-func (sr *ServiceRegister) Stop() {
+func (sr *ServiceRegister) Stop() (err error) {
 	cli := GetClient()
 	if cli == nil {
+		err = errors.New("etcd client not found")
 		return
 	}
 
@@ -85,4 +88,15 @@ func (sr *ServiceRegister) Stop() {
 		close(sr.stopChan)
 		sr.stopChan = nil
 	}
+
+	// revoke etcd lease
+	if sr.etcdLease != nil && sr.etcdLeaseId != nil {
+		ctx, cancel := context.WithTimeout(context.TODO(), 2*time.Second)
+		_, err = sr.etcdLease.Revoke(ctx, *sr.etcdLeaseId)
+		cancel()
+		if err != nil {
+			return
+		}
+	}
+	return
 }
