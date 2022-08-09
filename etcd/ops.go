@@ -3,6 +3,7 @@ package etcd
 import (
 	"context"
 	"errors"
+	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
@@ -36,6 +37,21 @@ func Put(key, val string, opts ...clientv3.OpOption) error {
 	}
 
 	_, err := clientv3.NewKV(cli).Put(context.TODO(), key, val, opts...)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func PutWithTimeout(timeout time.Duration, key, val string, opts ...clientv3.OpOption) error {
+	cli := GetClient()
+	if cli == nil {
+		return errors.New("etcd client not found")
+	}
+
+	ctx, cancel := context.WithTimeout(context.TODO(), timeout)
+	_, err := clientv3.NewKV(cli).Put(ctx, key, val, opts...)
+	cancel()
 	if err != nil {
 		return err
 	}
