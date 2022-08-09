@@ -11,13 +11,11 @@ import (
 )
 
 type ServiceRegister struct {
-	LeaseTTL    int64
-	Renewal     time.Duration
-	Key         string
-	Value       string
-	etcdLeaseId *clientv3.LeaseID
-	etcdLease   clientv3.Lease
-	stopChan    chan bool
+	LeaseTTL int64
+	Renewal  time.Duration
+	Key      string
+	Value    string
+	stopChan chan bool
 }
 
 func (sr *ServiceRegister) Start() error {
@@ -26,50 +24,72 @@ func (sr *ServiceRegister) Start() error {
 		return errors.New("etcd client not found")
 	}
 
-	lease := clientv3.NewLease(cli)
-	leaseGrantResp, err := lease.Grant(context.TODO(), sr.LeaseTTL)
-	if err != nil {
-		return err
-	}
-	leaseID := leaseGrantResp.ID
-	err = Put(sr.Key, sr.Value, clientv3.WithLease(leaseID))
-	if err != nil {
-		return err
-	}
-
 	// try to stop previous routine
-	sr.Stop()
+	_ = sr.Stop()
 
-	// start a new routine to do service register
-	stopChan := make(chan bool, 2)
 	renewalTimer := time.NewTicker(sr.Renewal)
 
+	// start routine to do service register
+	stopChan := make(chan bool, 2)
 	go func() {
-		loopFlag := true
+		var etcdLease clientv3.Lease
+		var etcdLeaseId *clientv3.LeaseID
+
 		for {
+			if etcdLease == nil {
+				etcdLease = clientv3.NewLease(cli)
+			}
+
+			if etcdLeaseId == nil {
+				ctx, cancel := context.WithTimeout(context.TODO(), 2*time.Second)
+				leaseGrantResp, err := etcdLease.Grant(ctx, sr.LeaseTTL)
+				cancel()
+				if err != nil {
+					log.Printf("[etcd] grant lease failed. key: %s, error: %s\n", sr.Key, err.Error())
+					time.Sleep(2 * time.Second)
+					continue
+				}
+				etcdLeaseId = &leaseGrantResp.ID
+				err = PutWithTimeout(2*time.Second, sr.Key, sr.Value, clientv3.WithLease(*etcdLeaseId))
+				if err != nil {
+					log.Printf("[etcd] lease put kv failed. key: %s, error: %s\n", sr.Key, err.Error())
+					time.Sleep(2 * time.Second)
+					continue
+				}
+			}
+
 			select {
 			case <-renewalTimer.C:
-				_, err := lease.KeepAliveOnce(context.TODO(), leaseID)
+				ctx, cancel := context.WithTimeout(context.TODO(), 2*time.Second)
+				_, err := etcdLease.KeepAliveOnce(ctx, *etcdLeaseId)
+				cancel()
 				if err == rpctypes.ErrLeaseNotFound {
 					// 正常 renewal 时, etcd lease 未找到
 					// 停止当前 routine， 启动新的 routine
 					// 比如当使用断点调试导致 etcd lease ttl 触发后删除了 lease 的情况
-					log.Printf("[etcd] etcd lease id [%d] is not found. start a new one\n", leaseID)
-					loopFlag = false
-					_ = sr.Start()
+					log.Printf("[etcd] etcd lease id [%d] is not found.\n", *etcdLeaseId)
+					etcdLeaseId = nil
+				} else if err != nil {
+					log.Printf("[etcd] lease keep alive failed. key: %s, error: %s\n", sr.Key, err.Error())
 				}
 			case <-stopChan:
-				loopFlag = false
-			}
-
-			if !loopFlag {
-				break
+				if etcdLease != nil && etcdLeaseId != nil {
+					// revoke etcd lease
+					ctx, cancel := context.WithTimeout(context.TODO(), 2*time.Second)
+					_, err := etcdLease.Revoke(ctx, *etcdLeaseId)
+					cancel()
+					if err != nil {
+						log.Printf("[etcd] revoke lease failed. key: %s, error: %s\n", sr.Key, err.Error())
+					}
+				}
+				goto END
 			}
 		}
+
+	END:
+		log.Printf("[etcd] register '%s' routine finish", sr.Key)
 	}()
 
-	sr.etcdLeaseId = &leaseID
-	sr.etcdLease = lease
 	sr.stopChan = stopChan
 
 	return nil
@@ -89,14 +109,5 @@ func (sr *ServiceRegister) Stop() (err error) {
 		sr.stopChan = nil
 	}
 
-	// revoke etcd lease
-	if sr.etcdLease != nil && sr.etcdLeaseId != nil {
-		ctx, cancel := context.WithTimeout(context.TODO(), 2*time.Second)
-		_, err = sr.etcdLease.Revoke(ctx, *sr.etcdLeaseId)
-		cancel()
-		if err != nil {
-			return
-		}
-	}
 	return
 }

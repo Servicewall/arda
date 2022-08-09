@@ -35,8 +35,11 @@ func (watcher *Watcher) Register() {
 }
 
 func StartWatchers() {
-	for _, watcher := range registerWatchers {
-		go watcher.startSyncWatch()
+	for i := 0; i < len(registerWatchers); i++ {
+		watcher := registerWatchers[i]
+		go func() {
+			_ = watcher.startSyncWatch()
+		}()
 	}
 }
 
@@ -67,7 +70,7 @@ func (w *Watcher) startSyncWatch() error {
 			case clientv3.EventTypePut:
 				res = &WatcherResult{
 					EventType: WatcherEventTypePut,
-					Kvs: []EtcdKV{EtcdKV{
+					Kvs: []EtcdKV{{
 						Key:   string(event.Kv.Key),
 						Value: event.Kv.Value,
 					}},
@@ -75,7 +78,7 @@ func (w *Watcher) startSyncWatch() error {
 			case clientv3.EventTypeDelete:
 				res = &WatcherResult{
 					EventType: WatcherEventTypeDelete,
-					Kvs: []EtcdKV{EtcdKV{
+					Kvs: []EtcdKV{{
 						Key:   string(event.Kv.Key),
 						Value: event.Kv.Value,
 					}},
