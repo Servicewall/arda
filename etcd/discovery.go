@@ -45,9 +45,7 @@ func (sd *ServiceDiscovery) Start() error {
 		},
 	}
 
-	go func() {
-		_ = sd.watcher.startSyncWatch()
-	}()
+	sd.watcher.watchAsync()
 	return nil
 }
 

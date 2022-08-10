@@ -9,13 +9,24 @@ import (
 )
 
 func Get(key string, opts ...clientv3.OpOption) (kvs []EtcdKV, err error) {
+	return GetWithCtx(context.TODO(), key, opts...)
+}
+
+func GetWithTimeout(timeout time.Duration, key string, opts ...clientv3.OpOption) (kvs []EtcdKV, err error) {
+	ctx, cancel := context.WithTimeout(context.TODO(), timeout)
+	kvs, err = GetWithCtx(ctx, key, opts...)
+	cancel()
+	return
+}
+
+func GetWithCtx(ctx context.Context, key string, opts ...clientv3.OpOption) (kvs []EtcdKV, err error) {
 	cli := GetClient()
 	if cli == nil {
 		err = errors.New("etcd client not found")
 		return
 	}
 
-	resp, err := clientv3.NewKV(cli).Get(context.TODO(), key, opts...)
+	resp, err := clientv3.NewKV(cli).Get(ctx, key, opts...)
 	if err != nil {
 		err = errors.New("etcd can not get value.")
 		return
@@ -31,31 +42,23 @@ func Get(key string, opts ...clientv3.OpOption) (kvs []EtcdKV, err error) {
 }
 
 func Put(key, val string, opts ...clientv3.OpOption) error {
-	cli := GetClient()
-	if cli == nil {
-		return errors.New("etcd client not found")
-	}
-
-	_, err := clientv3.NewKV(cli).Put(context.TODO(), key, val, opts...)
-	if err != nil {
-		return err
-	}
-	return nil
+	return PutWithCtx(context.TODO(), key, val, opts...)
 }
 
 func PutWithTimeout(timeout time.Duration, key, val string, opts ...clientv3.OpOption) error {
+	ctx, cancel := context.WithTimeout(context.TODO(), timeout)
+	err := PutWithCtx(ctx, key, val, opts...)
+	cancel()
+	return err
+}
+
+func PutWithCtx(ctx context.Context, key, val string, opts ...clientv3.OpOption) error {
 	cli := GetClient()
 	if cli == nil {
 		return errors.New("etcd client not found")
 	}
-
-	ctx, cancel := context.WithTimeout(context.TODO(), timeout)
 	_, err := clientv3.NewKV(cli).Put(ctx, key, val, opts...)
-	cancel()
-	if err != nil {
-		return err
-	}
-	return nil
+	return err
 }
 
 func Del(key string, opts ...clientv3.OpOption) error {
