@@ -2,7 +2,8 @@ package etcd
 
 import (
 	"context"
-	"errors"
+	"log"
+	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
@@ -13,6 +14,10 @@ const (
 	WatcherEventTypeCurrent WatcherEventType = iota
 	WatcherEventTypePut
 	WatcherEventTypeDelete
+)
+
+const (
+	watcherMaxGetFailedCount = 10
 )
 
 // WatcherEventTypeDelete: Kvs is the deleted kv
@@ -37,59 +42,78 @@ func (watcher *Watcher) Register() {
 func StartWatchers() {
 	for i := 0; i < len(registerWatchers); i++ {
 		watcher := registerWatchers[i]
-		go func() {
-			_ = watcher.startSyncWatch()
-		}()
+		watcher.watchAsync()
 	}
 }
 
-func (w *Watcher) startSyncWatch() error {
+func (w *Watcher) watchAsync() {
 	cli := GetClient()
 	if cli == nil {
-		return errors.New("etcd client not found")
+		log.Printf("[etcd error] etcd client is not found")
+		return
 	}
 
-	// get current value
-	resp, err := Get(w.EtcdKey, clientv3.WithPrefix())
-	if err != nil {
-		return err
-	}
-	if w.Callback != nil {
-		w.Callback(w.EtcdKey, WatcherResult{
-			EventType: WatcherEventTypeCurrent,
-			Kvs:       resp,
-		})
-	}
+	// routine
+	go func() {
+		defer func() {
+			log.Printf("[etcd] watcher routine end. watch key: %s", w.EtcdKey)
+		}()
 
-	watchChan := clientv3.NewWatcher(cli).Watch(context.TODO(), w.EtcdKey, clientv3.WithPrefix())
-
-	for resp := range watchChan {
-		for _, event := range resp.Events {
-			var res *WatcherResult
-			switch event.Type {
-			case clientv3.EventTypePut:
-				res = &WatcherResult{
-					EventType: WatcherEventTypePut,
-					Kvs: []EtcdKV{{
-						Key:   string(event.Kv.Key),
-						Value: event.Kv.Value,
-					}},
-				}
-			case clientv3.EventTypeDelete:
-				res = &WatcherResult{
-					EventType: WatcherEventTypeDelete,
-					Kvs: []EtcdKV{{
-						Key:   string(event.Kv.Key),
-						Value: event.Kv.Value,
-					}},
-				}
+		// get current value
+		var currentKvs []EtcdKV
+		findCurrent := false
+		for getFailedCount := 0; getFailedCount < watcherMaxGetFailedCount; getFailedCount++ {
+			var err error
+			currentKvs, err = GetWithTimeout(2*time.Second, w.EtcdKey, clientv3.WithPrefix())
+			if err == nil {
+				// break loop if get kv from etcd successfully.
+				findCurrent = true
+				break
 			}
+			// retry etcd get kv
+			time.Sleep(10 * time.Second)
+		}
 
-			if w.Callback != nil && res != nil {
-				w.Callback(w.EtcdKey, *res)
+		if !findCurrent {
+			log.Printf("[etcd error] watcher failed to get current kv. key: %s", w.EtcdKey)
+			return
+		}
+
+		if w.Callback != nil {
+			w.Callback(w.EtcdKey, WatcherResult{
+				EventType: WatcherEventTypeCurrent,
+				Kvs:       currentKvs,
+			})
+		}
+
+		watchChan := clientv3.NewWatcher(cli).Watch(context.TODO(), w.EtcdKey, clientv3.WithPrefix())
+
+		for resp := range watchChan {
+			for _, event := range resp.Events {
+				var res *WatcherResult
+				switch event.Type {
+				case clientv3.EventTypePut:
+					res = &WatcherResult{
+						EventType: WatcherEventTypePut,
+						Kvs: []EtcdKV{{
+							Key:   string(event.Kv.Key),
+							Value: event.Kv.Value,
+						}},
+					}
+				case clientv3.EventTypeDelete:
+					res = &WatcherResult{
+						EventType: WatcherEventTypeDelete,
+						Kvs: []EtcdKV{{
+							Key:   string(event.Kv.Key),
+							Value: event.Kv.Value,
+						}},
+					}
+				}
+
+				if w.Callback != nil && res != nil {
+					w.Callback(w.EtcdKey, *res)
+				}
 			}
 		}
-	}
-
-	return nil
+	}()
 }
