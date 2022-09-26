@@ -45,11 +45,19 @@ func GetClient() *clientv3.Client {
 	return etcdCli.GetEtcdClient()
 }
 
-func New(endpoints string) (cli *clientv3.Client, err error) {
+func New(endpoints string, options ...string) (cli *clientv3.Client, err error) {
+	var username, password string
+	if len(options) == 2 {
+		username = options[0]
+		password = options[1]
+	}
+
 	cfg := EtcdClientConfig{
 		clientv3.Config{
 			Endpoints:   strings.Split(endpoints, ","),
 			DialTimeout: 5 * time.Second,
+			Username:    username,
+			Password:    password,
 		},
 	}
 	cli, err = cfg.NewEtcdClient()
