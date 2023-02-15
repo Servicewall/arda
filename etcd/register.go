@@ -26,7 +26,11 @@ func (sr *ServiceRegister) Start() error {
 	}
 
 	// try to stop previous routine
-	_ = sr.Stop()
+	if sr.stopChan != nil {
+		sr.stopChan <- true
+		close(sr.stopChan)
+		sr.stopChan = nil
+	}
 
 	renewalTimer := time.NewTicker(sr.Renewal)
 
@@ -103,12 +107,6 @@ func (sr *ServiceRegister) Stop() (err error) {
 		return
 	}
 
-	if sr.stopChan != nil {
-		// stop previous registery routine
-		sr.stopChan <- true
-		close(sr.stopChan)
-		sr.stopChan = nil
-	}
-
+	sr.stopChan <- true
 	return
 }
