@@ -6,16 +6,18 @@ import (
 	"log"
 	"time"
 
-	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 type ServiceRegister struct {
-	LeaseTTL int64
-	Renewal  time.Duration
-	Key      string
-	Value    string
-	stopChan chan bool
+	LeaseTTL       int64
+	Renewal        time.Duration
+	Key            string
+	Value          string
+	lease          clientv3.Lease
+	leaseId        *clientv3.LeaseID
+	cancelRegister context.CancelFunc
+	stop           bool
 }
 
 func (sr *ServiceRegister) Start() error {
@@ -25,24 +27,18 @@ func (sr *ServiceRegister) Start() error {
 		return errors.New("etcd client not found")
 	}
 
-	// try to stop previous routine
-	if sr.stopChan != nil {
-		sr.stopChan <- true
-		close(sr.stopChan)
-		sr.stopChan = nil
-	}
-
-	renewalTimer := time.NewTicker(sr.Renewal)
+	//renewalTimer := time.NewTicker(sr.Renewal)
+	sr.stop = false
 
 	// start routine to do service register
-	stopChan := make(chan bool, 2)
 	go func() {
-		var etcdLease clientv3.Lease
-		var etcdLeaseId *clientv3.LeaseID
+		for !sr.stop {
+			var etcdLease clientv3.Lease
+			var etcdLeaseId *clientv3.LeaseID
 
-		for {
 			if etcdLease == nil {
 				etcdLease = clientv3.NewLease(cli)
+				sr.lease = etcdLease
 			}
 
 			if etcdLeaseId == nil {
@@ -55,6 +51,7 @@ func (sr *ServiceRegister) Start() error {
 					continue
 				}
 				etcdLeaseId = &leaseGrantResp.ID
+				sr.leaseId = etcdLeaseId
 				err = PutWithTimeout(2*time.Second, sr.Key, sr.Value, clientv3.WithLease(*etcdLeaseId))
 				if err != nil {
 					log.Printf("[etcd error] lease put kv failed. key: %s, error: %s\n", sr.Key, err.Error())
@@ -63,50 +60,65 @@ func (sr *ServiceRegister) Start() error {
 				}
 			}
 
-			select {
-			case <-renewalTimer.C:
-				ctx, cancel := context.WithTimeout(context.TODO(), 2*time.Second)
-				_, err := etcdLease.KeepAliveOnce(ctx, *etcdLeaseId)
-				cancel()
-				if err == rpctypes.ErrLeaseNotFound {
-					// 正常 renewal 时, etcd lease 未找到
-					// 停止当前 routine， 启动新的 routine
-					// 比如当使用断点调试导致 etcd lease ttl 触发后删除了 lease 的情况
-					log.Printf("[etcd error] etcd lease id [%d] is not found.\n", *etcdLeaseId)
-					etcdLeaseId = nil
-				} else if err != nil {
-					log.Printf("[etcd error] lease keep alive failed. key: %s, error: %s\n", sr.Key, err.Error())
-				}
-			case <-stopChan:
-				if etcdLease != nil && etcdLeaseId != nil {
-					// revoke etcd lease
-					ctx, cancel := context.WithTimeout(context.TODO(), 2*time.Second)
-					_, err := etcdLease.Revoke(ctx, *etcdLeaseId)
-					cancel()
-					if err != nil {
-						log.Printf("[etcd error] revoke lease failed. key: %s, error: %s\n", sr.Key, err.Error())
-					}
-				}
-				goto END
+			ctx, cancel := context.WithCancel(context.TODO())
+			sr.cancelRegister = cancel
+			respChan, err := etcdLease.KeepAlive(ctx, *etcdLeaseId)
+			if err != nil {
+				etcdLeaseId = nil
+				log.Printf("[etcd error] lease keep alive failed. key: %s, error: %s\n", sr.Key, err.Error())
+				continue
 			}
-		}
 
-	END:
-		log.Printf("[etcd] register '%s' routine finish", sr.Key)
+			for range respChan {
+			}
+			etcdLeaseId = nil
+			log.Printf("[etcd] cancle service register.")
+		}
+		log.Printf("[etcd] stop service register.")
 	}()
 
-	sr.stopChan = stopChan
+	go func() {
+		timer := time.NewTicker(30 * time.Second)
+		for {
+			<-timer.C
+			if sr.stop {
+				log.Print("[etcd] stop get register key loop. ")
+				break
+			}
+			kvs, err := GetWithTimeout(5*time.Second, sr.Key)
+			if err != nil {
+				log.Printf("[etcd error] get register key failed, %s", err.Error())
+			} else if len(kvs) == 0 {
+				log.Print("[etcd] register key died,re-register. ")
+				sr.cancelRegister()
+			}
+		}
+	}()
 
 	return nil
 }
 
 func (sr *ServiceRegister) Stop() (err error) {
-	cli := GetClient()
-	if cli == nil {
+	sr.stop = true
+	sr.cancelRegister()
+	err = sr.deregister()
+	return
+}
+
+func (sr *ServiceRegister) deregister() (err error) {
+	if cli := GetClient(); cli == nil {
 		err = errors.New("etcd client not found")
 		return
 	}
 
-	sr.stopChan <- true
+	if sr.lease != nil && sr.leaseId != nil {
+		// revoke etcd lease
+		ctx, cancel := context.WithTimeout(context.TODO(), 5*time.Second)
+		_, err = sr.lease.Revoke(ctx, *sr.leaseId)
+		cancel()
+		if err != nil {
+			log.Printf("[etcd error] revoke lease failed. key: %s, error: %s\n", sr.Key, err.Error())
+		}
+	}
 	return
 }
