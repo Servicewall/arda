@@ -2,6 +2,7 @@ package etcd
 
 import (
 	"context"
+	"google.golang.org/grpc/connectivity"
 	"log"
 	"time"
 
@@ -59,34 +60,33 @@ func (w *Watcher) watchAsync() {
 			log.Printf("[etcd] watcher routine end. watch key: %s", w.EtcdKey)
 		}()
 
-		// get current value
-		var currentKvs []EtcdKV
-		findCurrent := false
+		// check if etcd is ready
+		ready := false
 		for getFailedCount := 0; getFailedCount < watcherMaxGetFailedCount; getFailedCount++ {
-			var err error
-			currentKvs, err = GetWithTimeout(2*time.Second, w.EtcdKey, clientv3.WithPrefix())
-			if err == nil {
-				// break loop if get kv from etcd successfully.
-				findCurrent = true
+			if cli.ActiveConnection() != nil && cli.ActiveConnection().GetState() == connectivity.Ready {
+				ready = true
 				break
 			}
-			// retry etcd get kv
 			time.Sleep(10 * time.Second)
 		}
-
-		if !findCurrent {
-			log.Printf("[etcd error] watcher failed to get current kv. key: %s", w.EtcdKey)
+		if !ready {
+			log.Printf("[etcd error] etcd is not ready before timeout. key: %s", w.EtcdKey)
 			return
 		}
+		watchChan := clientv3.NewWatcher(cli).Watch(context.TODO(), w.EtcdKey, clientv3.WithPrefix())
 
+		// get current value
+		currentKvs, err := GetWithTimeout(2*time.Second, w.EtcdKey, clientv3.WithPrefix())
+		if err != nil {
+			log.Printf("[etcd error] watcher failed to get current kv. key: %s, err: %s", w.EtcdKey, err)
+			return
+		}
 		if w.Callback != nil {
 			w.Callback(w.EtcdKey, WatcherResult{
 				EventType: WatcherEventTypeCurrent,
 				Kvs:       currentKvs,
 			})
 		}
-
-		watchChan := clientv3.NewWatcher(cli).Watch(context.TODO(), w.EtcdKey, clientv3.WithPrefix())
 
 		for resp := range watchChan {
 			for _, event := range resp.Events {
