@@ -72,7 +72,7 @@ func (sr *ServiceRegister) Start() error {
 			for range respChan {
 			}
 			etcdLeaseId = nil
-			log.Printf("[etcd] cancle service register.")
+			log.Printf("[etcd] cancel service register.")
 		}
 		log.Printf("[etcd] stop service register.")
 	}()
