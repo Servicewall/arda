@@ -1,6 +1,8 @@
 package locale
 
-import "golang.org/x/text/language"
+import (
+	"golang.org/x/text/language"
+)
 
 type I18nLanguage int
 
@@ -9,19 +11,30 @@ const (
 	ZhCN
 )
 
-var SupportLanguages = []language.Tag{
-	language.AmericanEnglish, // The first language is used as matcher fallback.
-	language.Make("zh-CN"),
+// var languageTagList = []language.Tag{
+// 	language.AmericanEnglish, // The first language is used as matcher fallback.
+// 	language.Make("zh-CN"),
+// }
+//
+// func (lang I18nLanguage) Tag() string {
+// 	return languageTagList[lang].String()
+// }
+
+func ToLanguage(str string) I18nLanguage {
+	switch str {
+	case "zh-CN":
+		return ZhCN
+	case language.AmericanEnglish.String():
+		return EnUS
+	default:
+		return ZhCN // default value
+	}
 }
 
-func (lang I18nLanguage) Tag() string {
-	return SupportLanguages[lang].String()
-}
-
-type I18nMsgMap map[string]string
+type I18nMsgMap map[I18nLanguage]string
 
 func (msgMap I18nMsgMap) SetMsg(lang I18nLanguage, msg string) I18nMsgMap {
-	msgMap[lang.Tag()] = msg
+	msgMap[lang] = msg
 	return msgMap
 }
 
