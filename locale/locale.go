@@ -11,15 +11,6 @@ const (
 	ZhCN
 )
 
-// var languageTagList = []language.Tag{
-// 	language.AmericanEnglish, // The first language is used as matcher fallback.
-// 	language.Make("zh-CN"),
-// }
-//
-// func (lang I18nLanguage) Tag() string {
-// 	return languageTagList[lang].String()
-// }
-
 func ToLanguage(str string) I18nLanguage {
 	switch str {
 	case "zh-CN":
