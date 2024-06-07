@@ -21,6 +21,10 @@ func (cfg *EtcdClientConfig) NewEtcdClient() (*clientv3.Client, error) {
 	return clientv3.New(cfg.Config)
 }
 
+func SetEtcdClient(client *clientv3.Client) {
+	etcdCli.SetEtcdClient(client)
+}
+
 type etcdClient struct {
 	sync.RWMutex
 	cli *clientv3.Client
