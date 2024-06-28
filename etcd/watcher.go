@@ -2,9 +2,11 @@ package etcd
 
 import (
 	"context"
-	"google.golang.org/grpc/connectivity"
 	"log"
+	"sync/atomic"
 	"time"
+
+	"google.golang.org/grpc/connectivity"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
@@ -17,10 +19,6 @@ const (
 	WatcherEventTypeDelete
 )
 
-const (
-	watcherMaxGetFailedCount = 10
-)
-
 // WatcherEventTypeDelete: Kvs is the deleted kv
 type WatcherResult struct {
 	EventType WatcherEventType
@@ -30,8 +28,10 @@ type WatcherResult struct {
 type WatcherCallback func(string, WatcherResult)
 
 type Watcher struct {
-	EtcdKey  string
-	Callback WatcherCallback
+	EtcdKey         string
+	Callback        WatcherCallback
+	isStarted       atomic.Bool
+	isCurrentCalled atomic.Bool
 }
 
 var registerWatchers []*Watcher = make([]*Watcher, 0)
@@ -43,51 +43,54 @@ func (watcher *Watcher) Register() {
 func StartWatchers() {
 	for i := 0; i < len(registerWatchers); i++ {
 		watcher := registerWatchers[i]
-		watcher.watchAsync()
+		go watcher.start()
 	}
 }
 
-func (w *Watcher) watchAsync() {
-	cli := GetClient()
-	if cli == nil {
-		log.Printf("[etcd error] etcd client is not found")
+func (w *Watcher) start() {
+	if w.isStarted.Load() {
+		log.Printf("[arda etcd error] watcher has been already started. key: %s", w.EtcdKey)
 		return
 	}
+	w.isStarted.Store(true)
 
-	// routine
-	go func() {
-		defer func() {
-			log.Printf("[etcd] watcher routine end. watch key: %s", w.EtcdKey)
-		}()
+	defer func() {
+		log.Printf("[arda etcd error] watcher routine end. watch key: %s", w.EtcdKey)
+	}()
 
-		// check if etcd is ready
-		ready := false
-		for getFailedCount := 0; getFailedCount < watcherMaxGetFailedCount; getFailedCount++ {
-			if cli.ActiveConnection() != nil && cli.ActiveConnection().GetState() == connectivity.Ready {
-				ready = true
-				break
+	for {
+		cli := GetClient()
+		if cli == nil {
+			log.Printf("[arda etcd error] etcd client is not found. retry after 20 seconds")
+			time.Sleep(20 * time.Second)
+			continue
+		}
+
+		// etcd client is not ready
+		if cli.ActiveConnection() == nil || cli.ActiveConnection().GetState() != connectivity.Ready {
+			log.Printf("[arda etcd error] etcd is not ready, retry later. key: %s", w.EtcdKey)
+			time.Sleep(20 * time.Second)
+			continue
+		}
+
+		if !w.isCurrentCalled.Load() {
+			// get current value
+			currentKvs, err := GetWithTimeout(2*time.Second, w.EtcdKey, clientv3.WithPrefix())
+			if err != nil {
+				log.Printf("[arda etcd error] watcher failed to get current kv. key: %s, err: %s", w.EtcdKey, err)
+				time.Sleep(20 * time.Second)
+				continue
 			}
-			time.Sleep(10 * time.Second)
+			if w.Callback != nil {
+				w.Callback(w.EtcdKey, WatcherResult{
+					EventType: WatcherEventTypeCurrent,
+					Kvs:       currentKvs,
+				})
+			}
+			w.isCurrentCalled.Store(true)
 		}
-		if !ready {
-			log.Printf("[etcd error] etcd is not ready before timeout. key: %s", w.EtcdKey)
-			return
-		}
+
 		watchChan := clientv3.NewWatcher(cli).Watch(context.TODO(), w.EtcdKey, clientv3.WithPrefix())
-
-		// get current value
-		currentKvs, err := GetWithTimeout(2*time.Second, w.EtcdKey, clientv3.WithPrefix())
-		if err != nil {
-			log.Printf("[etcd error] watcher failed to get current kv. key: %s, err: %s", w.EtcdKey, err)
-			return
-		}
-		if w.Callback != nil {
-			w.Callback(w.EtcdKey, WatcherResult{
-				EventType: WatcherEventTypeCurrent,
-				Kvs:       currentKvs,
-			})
-		}
-
 		for resp := range watchChan {
 			for _, event := range resp.Events {
 				var res *WatcherResult
@@ -115,5 +118,5 @@ func (w *Watcher) watchAsync() {
 				}
 			}
 		}
-	}()
+	}
 }
