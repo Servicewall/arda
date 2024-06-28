@@ -23,7 +23,7 @@ type ServiceRegister struct {
 func (sr *ServiceRegister) Start() error {
 	cli := GetClient()
 	if cli == nil {
-		log.Printf("[etcd error] etcd client is not found")
+		log.Printf("[arda etcd error] etcd client is not found")
 		return errors.New("etcd client not found")
 	}
 
@@ -36,45 +36,42 @@ func (sr *ServiceRegister) Start() error {
 			var etcdLease clientv3.Lease
 			var etcdLeaseId *clientv3.LeaseID
 
-			if etcdLease == nil {
-				etcdLease = clientv3.NewLease(cli)
-				sr.lease = etcdLease
+			log.Printf("[arda etcd] start service register. key: " + sr.Key)
+			etcdLease = clientv3.NewLease(cli)
+			sr.lease = etcdLease
+
+			ctx, cancel := context.WithTimeout(context.TODO(), 2*time.Second)
+			leaseGrantResp, err := etcdLease.Grant(ctx, sr.LeaseTTL)
+			cancel()
+			if err != nil {
+				log.Printf("[arda etcd error] grant lease failed. key: %s, error: %s\n", sr.Key, err.Error())
+				time.Sleep(2 * time.Second)
+				continue
+			}
+			etcdLeaseId = &leaseGrantResp.ID
+			sr.leaseId = etcdLeaseId
+			err = PutWithTimeout(2*time.Second, sr.Key, sr.Value, clientv3.WithLease(*etcdLeaseId))
+			if err != nil {
+				log.Printf("[arda etcd error] lease put kv failed. key: %s, error: %s\n", sr.Key, err.Error())
+				time.Sleep(2 * time.Second)
+				continue
 			}
 
-			if etcdLeaseId == nil {
-				ctx, cancel := context.WithTimeout(context.TODO(), 2*time.Second)
-				leaseGrantResp, err := etcdLease.Grant(ctx, sr.LeaseTTL)
-				cancel()
-				if err != nil {
-					log.Printf("[etcd error] grant lease failed. key: %s, error: %s\n", sr.Key, err.Error())
-					time.Sleep(2 * time.Second)
-					continue
-				}
-				etcdLeaseId = &leaseGrantResp.ID
-				sr.leaseId = etcdLeaseId
-				err = PutWithTimeout(2*time.Second, sr.Key, sr.Value, clientv3.WithLease(*etcdLeaseId))
-				if err != nil {
-					log.Printf("[etcd error] lease put kv failed. key: %s, error: %s\n", sr.Key, err.Error())
-					time.Sleep(2 * time.Second)
-					continue
-				}
-			}
-
-			ctx, cancel := context.WithCancel(context.TODO())
+			ctx, cancel = context.WithCancel(context.TODO())
 			sr.cancelRegister = cancel
 			respChan, err := etcdLease.KeepAlive(ctx, *etcdLeaseId)
 			if err != nil {
 				etcdLeaseId = nil
-				log.Printf("[etcd error] lease keep alive failed. key: %s, error: %s\n", sr.Key, err.Error())
+				log.Printf("[arda etcd error] lease keep alive failed. key: %s, error: %s\n", sr.Key, err.Error())
 				continue
 			}
 
 			for range respChan {
 			}
 			etcdLeaseId = nil
-			log.Printf("[etcd] cancel service register.")
+			log.Printf("[arda etcd] cancel service register.")
 		}
-		log.Printf("[etcd] stop service register.")
+		log.Printf("[arda etcd] end service register.")
 	}()
 
 	go func() {
@@ -82,14 +79,14 @@ func (sr *ServiceRegister) Start() error {
 		for {
 			<-timer.C
 			if sr.stop {
-				log.Print("[etcd] stop get register key loop. ")
+				log.Print("[arda etcd] stop get register key loop. ")
 				break
 			}
 			kvs, err := GetWithTimeout(5*time.Second, sr.Key)
 			if err != nil {
-				log.Printf("[etcd error] get register key failed, %s", err.Error())
+				log.Printf("[arda etcd error] get register key failed, %s", err.Error())
 			} else if len(kvs) == 0 {
-				log.Print("[etcd] register key died,re-register. ")
+				log.Print("[arda etcd] register key died,re-register. ")
 				sr.cancelRegister()
 			}
 		}
@@ -117,7 +114,7 @@ func (sr *ServiceRegister) deregister() (err error) {
 		_, err = sr.lease.Revoke(ctx, *sr.leaseId)
 		cancel()
 		if err != nil {
-			log.Printf("[etcd error] revoke lease failed. key: %s, error: %s\n", sr.Key, err.Error())
+			log.Printf("[arda etcd error] revoke lease failed. key: %s, error: %s\n", sr.Key, err.Error())
 		}
 	}
 	return
