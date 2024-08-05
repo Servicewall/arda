@@ -3,6 +3,7 @@ package etcd
 import (
 	"context"
 	"log"
+	"sort"
 	"sync/atomic"
 	"time"
 
@@ -28,19 +29,35 @@ type WatcherResult struct {
 type WatcherCallback func(string, WatcherResult)
 
 type Watcher struct {
+	Scale           int
 	EtcdKey         string
 	Callback        WatcherCallback
 	isStarted       atomic.Bool
 	isCurrentCalled atomic.Bool
 }
 
-var registerWatchers []*Watcher = make([]*Watcher, 0)
+type watchers []*Watcher
+
+var registerWatchers watchers = make([]*Watcher, 0)
 
 func (watcher *Watcher) Register() {
 	registerWatchers = append(registerWatchers, watcher)
 }
 
+func (w watchers) Len() int {
+	return len(w)
+}
+
+func (w watchers) Swap(i, j int) {
+	w[i], w[j] = w[j], w[i]
+}
+
+func (w watchers) Less(i, j int) bool {
+	return w[i].Scale > w[j].Scale
+}
+
 func StartWatchers() {
+	sort.Sort(registerWatchers)
 	for i := 0; i < len(registerWatchers); i++ {
 		watcher := registerWatchers[i]
 		go watcher.start()
