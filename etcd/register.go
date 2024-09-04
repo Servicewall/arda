@@ -36,7 +36,7 @@ func (sr *ServiceRegister) Start() error {
 			var etcdLease clientv3.Lease
 			var etcdLeaseId *clientv3.LeaseID
 
-			log.Printf("[arda etcd] start service register. key: " + sr.Key)
+			log.Print("[arda etcd] start service register. key: " + sr.Key)
 			etcdLease = clientv3.NewLease(cli)
 			sr.lease = etcdLease
 
