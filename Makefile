@@ -27,3 +27,8 @@ install-git-hook:
 	@chmod +x .git/hooks/pre-commit
 	@echo "git hook is installed."
 
+.PHONY: go_mod_upgrade
+go_mod_upgrade:
+	GOTOOLCHAIN=go1.23.0 go get -u ./...
+	GOTOOLCHAIN=go1.23.0 go mod tidy
+
