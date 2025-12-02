@@ -55,6 +55,11 @@ func (err *APIResponseError) SetMessage(msg string) *APIResponseError {
 	return err
 }
 
+func (err *APIResponseError) SetMessageCode(code int) *APIResponseError {
+	err.BizCode = code
+	return err
+}
+
 func (err *APIResponseError) SetI18nMsg(lang I18nLanguage, msg string) *APIResponseError {
 	if err.MsgI18nMap == nil {
 		err.MsgI18nMap = I18nMsgMap{}
