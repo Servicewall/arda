@@ -58,10 +58,12 @@ func New(endpoints string, options ...string) (cli *clientv3.Client, err error) 
 
 	cfg := EtcdClientConfig{
 		clientv3.Config{
-			Endpoints:   strings.Split(endpoints, ","),
-			DialTimeout: 5 * time.Second,
-			Username:    username,
-			Password:    password,
+			Endpoints:          strings.Split(endpoints, ","),
+			DialTimeout:        5 * time.Second,
+			Username:           username,
+			Password:           password,
+			MaxCallSendMsgSize: 20 * 1024 * 1024,
+			MaxCallRecvMsgSize: 20 * 1024 * 1024,
 		},
 	}
 	cli, err = cfg.NewEtcdClient()
