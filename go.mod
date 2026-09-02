@@ -1,11 +1,11 @@
 module github.com/Servicewall/arda
 
-go 1.24.0
+go 1.25.0
 
 require (
 	go.etcd.io/etcd/client/v3 v3.5.18
-	golang.org/x/text v0.32.0
-	google.golang.org/grpc v1.79.3
+	golang.org/x/text v0.37.0
+	google.golang.org/grpc v1.83.1
 )
 
 require (
@@ -17,9 +17,9 @@ require (
 	go.etcd.io/etcd/client/pkg/v3 v3.5.18 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
-	golang.org/x/net v0.48.0 // indirect
-	golang.org/x/sys v0.39.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20251202230838-ff82c1b0f217 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20251202230838-ff82c1b0f217 // indirect
-	google.golang.org/protobuf v1.36.10 // indirect
+	golang.org/x/net v0.55.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20260526163538-3dc84a4a5aaa // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
+	google.golang.org/protobuf v1.36.11 // indirect
 )
